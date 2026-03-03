@@ -17,6 +17,7 @@ retry_strategy = Retry(
 adapter = HTTPAdapter(max_retries=retry_strategy)
 session = requests.Session()
 session.mount("https://", adapter)
+session.mount("http://", adapter)
 
 
 def parse_args():
@@ -24,10 +25,9 @@ def parse_args():
         description="Refresh a Cloudflare DNS A record when your public IP changes."
     )
     parser.add_argument("--zone-id", required=True, help="Cloudflare zone ID.")
-    parser.add_argument("--dns-record-id", required=True, help="Cloudflare DNS record ID.")
+    parser.add_argument("--dns-record-id", help="Cloudflare DNS record ID.")
     parser.add_argument(
         "--dns-record-name",
-        required=True,
         help="DNS record name (for example: home.example.com).",
     )
     parser.add_argument(
@@ -39,6 +39,11 @@ def parse_args():
         "--dry-run",
         action="store_true",
         help="Print planned DNS changes without sending a PUT request.",
+    )
+    parser.add_argument(
+        "--list-records",
+        action="store_true",
+        help="List available DNS records for the zone and exit.",
     )
     return parser.parse_args()
 
@@ -68,6 +73,32 @@ def get_last_public_ip_address(fn):
 def save_ip_address(ip, fn):
     with open(fn, 'w') as f: f.write(ip)
 
+def get_dns_records(zone_id, api_token):
+    url = f"https://api.cloudflare.com/client/v4/zones/{zone_id}/dns_records"
+    headers = {
+        "Authorization": f"Bearer {api_token}"
+    }
+
+    try:
+        response = session.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        # Cloudflare API result will include errors, messages, a success flag, and a result object
+        data = response.json()
+    except requests.exceptions.Timeout:
+        print('❌ Timed out while getting Cloudflare DNS records')
+        return []
+    except requests.exceptions.RequestException as err:
+        print(f'❌ Failed to get Cloudflare DNS records: {err}')
+        return []
+
+    if data.get("success"): return data.get("result", [])
+
+    if data.get("errors") and len(data["errors"]) > 0:
+        print('⚠️ Errors were returned from Cloudflare.')
+        for error in data["errors"]: print(error)
+
+    return []
+
 def put_dns_update(zone_id, dns_record_id, dns_record_name, ip_address, api_token) -> dict:
     url = f"https://api.cloudflare.com/client/v4/zones/{zone_id}/dns_records/{dns_record_id}"
     headers = {
@@ -78,7 +109,10 @@ def put_dns_update(zone_id, dns_record_id, dns_record_name, ip_address, api_toke
         "type": "A",
         "name": dns_record_name,
         "content": ip_address,
+        # 1 hour TTL
         "ttl": 3600,
+        # unproxied to avoid Cloudflare bandwidth limitations
+        # also to avoid issues with their T&S
         "proxied": False,
     }
 
@@ -89,10 +123,10 @@ def put_dns_update(zone_id, dns_record_id, dns_record_name, ip_address, api_toke
         data = response.json()
     except requests.exceptions.Timeout:
         print('❌ Timed out while updating Cloudflare DNS record')
-        return {"success": False, "errors": [{"message": "request timeout"}]}
+        return []
     except requests.exceptions.RequestException as err:
         print(f'❌ Failed to update Cloudflare DNS record: {err}')
-        return {"success": False, "errors": [{"message": str(err)}]}
+        return []
 
     if data.get("success"): return data
 
@@ -125,9 +159,30 @@ def init_env_variables(args):
 if __name__ == "__main__":
     args = parse_args()
     env = init_env_variables(args)
+
+    if args.list_records:
+        records = get_dns_records(
+            zone_id=env["CLOUDFLARE_ZONE_ID"],
+            api_token=env["CLOUDFLARE_API_TOKEN"],
+        )
+        if not records:
+            print('No DNS records found (or request failed).')
+            raise SystemExit(0)
+
+        print(f"Found {len(records)} DNS record(s):")
+        for record in records:
+            print(
+                f"- {record.get('id')} | {record.get('type')} | "
+                f"{record.get('name')} -> {record.get('content')}"
+            )
+        raise SystemExit(0)
+
+    if not args.dns_record_id or not args.dns_record_name:
+        raise ValueError("--dns-record-id and --dns-record-name are required unless --list-records is used")
+
     curr_ip = get_current_public_ip_address()
-    if not curr_ip:
-        raise SystemExit(1)
+    if (curr_ip is None):
+        raise ValueError('⚠️ The current IP was not resolved - aborting')
 
     last_ip = get_last_public_ip_address(fn=env["LAST_IP_FN"])
 
@@ -139,15 +194,15 @@ if __name__ == "__main__":
             print('🧪 Dry-run mode enabled. No request was sent to Cloudflare.')
             print(
                 f"Would update zone '{env['CLOUDFLARE_ZONE_ID']}', "
-                f"record '{env['CLOUDFLARE_DNS_RECORD_ID']}' "
-                f"({env['DNS_RECORD_NAME']}) to IP '{curr_ip}'."
+                f"record '{args.dns_record_id}' "
+                f"({args.dns_record_name}) to IP '{curr_ip}'."
             )
             raise SystemExit(0)
 
         result = put_dns_update(
             zone_id=env["CLOUDFLARE_ZONE_ID"],
-            dns_record_id=env["CLOUDFLARE_DNS_RECORD_ID"],
-            dns_record_name=env["DNS_RECORD_NAME"],
+            dns_record_id=args.dns_record_id,
+            dns_record_name=args.dns_record_name,
             ip_address=curr_ip,
             api_token=env["CLOUDFLARE_API_TOKEN"],
         )
