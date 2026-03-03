@@ -1,0 +1,66 @@
+# --- Environment variables ---
+.env
+.env.*
+!.env.example
+last-known-ip.txt
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+ENV/
+
+Include/
+Lib/
+Scripts/
+pyvenv.cfg
+
+# --- Python cache / bytecode ---
+__pycache__/
+*.py[cod]
+*$py.class
+
+# --- Distribution / packaging ---
+build/
+dist/
+downloads/
+eggs/
+.eggs/
+*.egg-info/
+*.egg
+pip-wheel-metadata/
+share/python-wheels/
+
+# --- Logs / runtime ---
+*.log
+*.out
+*.err
+
+# --- Test / coverage ---
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.hypothesis/
+.tox/
+.nox/
+
+# --- Type checking / lint / formatting caches ---
+.mypy_cache/
+.pyre/
+.ruff_cache/
+.pytype/
+
+# --- Local app/tool state ---
+.python-version
+
+# --- IDE / editor ---
+.vscode/
+.idea/
+*.iml
+
+# --- OS files ---
+.DS_Store
+Thumbs.db
+desktop.ini
