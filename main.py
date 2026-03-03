@@ -123,11 +123,12 @@ def put_dns_update(zone_id, dns_record_id, dns_record_name, ip_address, api_toke
         data = response.json()
     except requests.exceptions.Timeout:
         print('❌ Timed out while updating Cloudflare DNS record')
-        return []
+        return None
     except requests.exceptions.RequestException as err:
         print(f'❌ Failed to update Cloudflare DNS record: {err}')
-        return []
+        return None
 
+    print(f"☁️ Cloudflare response success: {data.get('success')}")
     if data.get("success"): return data
 
     if data.get("errors") and len(data["errors"]) > 0:
@@ -206,8 +207,7 @@ if __name__ == "__main__":
             ip_address=curr_ip,
             api_token=env["CLOUDFLARE_API_TOKEN"],
         )
-        print(f"☁️ Cloudflare response success: {result.get('success')}")
         # persist the last known address only if we can update the DNS record
-        if result.get("success"):
+        if result is not None and result.get('success'):
             save_ip_address(curr_ip, fn=env["LAST_IP_FN"])
             print(f'📃 DNS record updated. Persisted last known IP to file: {env["LAST_IP_FN"]}')
